@@ -1,0 +1,124 @@
+/*
+
+SpeakEZ - Script for Voice Polling - Call Handler
+November, 2015
+
+*/
+
+// pre setting
+//var file_path = '/home/sharicus/Desktop/outbound_call/files/voice_polling';
+var file_path = '/opt/freedomfone/gui/app/webroot/upload/voice_polling';
+
+// delimiter
+var argument_delimiter = '|';
+var answer_key_delimiter = '-';
+
+// arguments
+var poll_id = argv[0];
+var recipient_no = argv[1];
+var total_question = argv[2];
+var answer_key = argv[3].split(argument_delimiter);
+
+// uncomment when database is accessible
+
+// database connection establising
+use("ODBC");
+// DSN and credentials
+var db = new ODBC("freeswitch", "root", "Karen753CIS");
+db.connect();
+db.query('use freedomfone');
+
+var continue_question = false;
+var current_question = 0;
+var current_question_index = 0;
+
+function validateInput(key, range) {
+    var range = range.split(answer_key_delimiter);
+    var start = range[0];
+    var end = range[1];
+
+    console_log('notice', 'start '+ start +' end '+end +' key '+key+'\n');
+
+    if(key<=end && key >= start) {
+        console_log('notice', 'answer validation successful\n');
+        return true;
+    } else {
+        console_log('notice', 'answer validation failed\n');
+        return false;
+    }
+}
+
+// getting input from DTMF
+function onInput( session, type, data, arg ) {
+    if ( type == "dtmf" ) {
+        //getting a key press - whatever the key is
+        console_log( "info", "Got digit " + data.digit + '\n' );
+        console_log( "info", "validate against " + answer_key[current_question_index] + '\n');
+        
+        if(validateInput(data.digit, answer_key[current_question_index])) {
+                var sql = 'INSERT INTO  poll_response (poll_id, recipient_no, question_id, answer_key) VALUES ('+poll_id+', '+recipient_no+','+(current_question)+','+data.digit+')';
+                db.query(sql);
+        
+                //flag to continue to next question
+                continue_question = true;
+        } else {
+            continue_question = false;
+        }
+    }
+    return false;
+}
+
+function on_dtmf(session, type, obj, arg)
+{
+try {
+ if (type == "dtmf") {
+    allDigits += obj.digit;
+    console_log("info", "DTMF digit: " + session.name + " [" + obj.digit + "] len [" + obj.duration + "]\n\n");
+ }
+} catch (e) {
+ console_log("err", e + "\n");
+}
+return true;
+}
+
+
+console_log('warning', 'call handler activated ' + recipient_no + '\n');
+
+session.answer();
+while ( session.ready( ) ) {
+
+    
+    session.recordFile("/tmp/asp.wav", on_dtmf, "", 240, 500, 3);
+    
+    for ( i = 0; i < total_question; i++) {
+        //reset question flag
+        continue_question = false;
+        current_question = i+1;
+        current_question_index = i;
+        console_log('info', 'current question '+current_question+'\n');
+
+        while(session.ready() && continue_question == false) {
+                console_log('notice', current_question + ' file playing\n');
+                if (answer_key[current_question_index] != '-') {
+                    session.streamFile(file_path+'/'+poll_id+'/question_'+current_question+'.wav', onInput);
+                } else {
+                    session.streamFile(file_path+'/'+poll_id+'/question_'+current_question+'.wav');
+                    continue_question = true;
+                }
+        }
+    }
+
+    var sql = 'INSERT INTO  poll_delivery (poll_id, batch_id, recipient_number, deliver_status) VALUES ('+poll_id+', 0, "'+recipient_no+'", "deliveried")';
+    db.query(sql);
+
+    console_log('warning', 'call ended ' + sql + '\n');
+    session.hangup();
+
+
+
+}
+
+
+
+
+
